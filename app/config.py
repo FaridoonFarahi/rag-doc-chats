@@ -13,8 +13,12 @@ CHUNK_OVERLAP = 150
 # Retrieval settings (tune later)
 TOP_K = 4
 
-# Embeddings model (simple default)
+# Models
 EMBEDDING_MODEL = "text-embedding-3-small"
+CHAT_MODEL = "gpt-4o-mini"
+
+# Safety limits
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB per file
+MAX_CHUNKS_PER_INGEST = 5000          # cap embedding spend per ingest
 
 DEFAULT_COLLECTION = "rag_docs"
-

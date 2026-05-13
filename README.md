@@ -179,9 +179,37 @@ rag-doc-chat/
 │   ├── config.py          # Chunking, paths, model config
 │   └── __init__.py
 ├── data/
-│   ├── uploads/           # Saved uploads
-│   └── chroma_db/         # Persistent vector store
-├── .env                   # API keys (not committed)
+│   ├── uploads/           # Saved uploads (gitignored)
+│   └── chroma_db/         # Persistent vector store (gitignored)
+├── .env.example           # Template — copy to .env and fill in
 ├── .gitignore
 └── requirements.txt
 ```
+
+---
+
+## 🛠️ Setup
+
+```bash
+# 1. Clone and enter the repo
+git clone https://github.com/FaridoonFarahi/rag-doc-chats.git
+cd rag-doc-chats
+
+# 2. Create a virtualenv
+python -m venv .venv
+# Windows
+.venv\Scripts\activate
+# macOS / Linux
+source .venv/bin/activate
+
+# 3. Install deps
+pip install -r requirements.txt
+
+# 4. Configure your OpenAI key
+cp .env.example .env        # then edit .env and paste your key
+
+# 5. Run the app
+streamlit run app/ui.py
+```
+
+> The `.env` file is gitignored — never commit your API key.

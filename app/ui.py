@@ -3,25 +3,31 @@ from pathlib import Path
 from datetime import datetime
 
 import streamlit as st
+from dotenv import load_dotenv
 
 # Ensure project root is importable (Windows + Streamlit friendly)
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.rag import save_uploads, ingest_files, ask_question, get_db_and_retriever
-from app.config import CHROMA_DIR
+# Load .env once, at process start, before any module that needs the key.
+load_dotenv(PROJECT_ROOT / ".env")
+
+from app.rag import (  # noqa: E402  (import after sys.path + dotenv setup)
+    save_uploads,
+    ingest_files,
+    ask_question,
+    get_db_and_retriever,
+    build_chain,
+    IngestError,
+)
 
 st.set_page_config(page_title="Doc Chat (RAG)", layout="wide")
 st.title("📄 Doc Chat (RAG)")
 
-# ---------------- Helpers ----------------
+
 def new_collection_name() -> str:
-    # unique name each time (prevents Windows lock issues from deletion)
+    # Unique per ingest — avoids Windows file-lock issues from deletion.
     return "rag_docs_" + datetime.now().strftime("%Y%m%d_%H%M%S")
-
-
-def chroma_exists() -> bool:
-    return CHROMA_DIR.exists() and any(CHROMA_DIR.iterdir())
 
 
 # ---------------- Sidebar ----------------
@@ -30,23 +36,28 @@ st.sidebar.header("Documents")
 uploaded_files = st.sidebar.file_uploader(
     "Upload PDF, DOCX, or TXT",
     type=["pdf", "docx", "txt"],
-    accept_multiple_files=True
+    accept_multiple_files=True,
 )
 
 colA, colB = st.sidebar.columns(2)
 ingest_clicked = colA.button("📥 Ingest", type="primary", disabled=not uploaded_files)
 clear_clicked = colB.button("🧹 Clear")
 
-# Initialize session state
+# ---------------- Session state ----------------
 if "chat" not in st.session_state:
     st.session_state.chat = []
 
 if "collection" not in st.session_state:
-    # If an existing DB exists but we don't know collection, start fresh
-    # (In practice you can persist the last used collection name later.)
     st.session_state.collection = new_collection_name()
 
-# Clear = switch to a new empty collection (no file deletion)
+if "chain" not in st.session_state:
+    try:
+        st.session_state.chain = build_chain()
+    except RuntimeError as e:
+        st.session_state.chain = None
+        st.sidebar.error(str(e))
+
+# Clear = switch to a fresh empty collection (no filesystem deletion).
 if clear_clicked:
     st.session_state.chat = []
     st.session_state.pop("retriever", None)
@@ -55,24 +66,24 @@ if clear_clicked:
     st.sidebar.success("Cleared: switched to a new empty index.")
     st.rerun()
 
-# Ingest flow
+# ---------------- Ingest flow ----------------
 if ingest_clicked:
-    with st.spinner("Saving & indexing documents..."):
-        saved_paths = save_uploads(uploaded_files)
-        # New collection each ingest keeps things clean and avoids Windows file lock deletion issues
-        st.session_state.collection = new_collection_name()
-        num_docs, num_chunks = ingest_files(saved_paths, st.session_state.collection)
-
-    # Cache db+retriever for fast Q&A
-    db, retriever = get_db_and_retriever(st.session_state.collection)
-    st.session_state["db"] = db
-    st.session_state["retriever"] = retriever
-
-    st.sidebar.success(f"Indexed {num_chunks} chunks from {num_docs} docs/pages.")
+    try:
+        with st.spinner("Saving & indexing documents..."):
+            saved_paths = save_uploads(uploaded_files)
+            st.session_state.collection = new_collection_name()
+            num_docs, num_chunks = ingest_files(saved_paths, st.session_state.collection)
+        db, retriever = get_db_and_retriever(st.session_state.collection)
+        st.session_state["db"] = db
+        st.session_state["retriever"] = retriever
+        st.sidebar.success(f"Indexed {num_chunks} chunks from {num_docs} docs/pages.")
+    except IngestError as e:
+        st.sidebar.error(f"Ingest rejected: {e}")
+    except Exception as e:  # noqa: BLE001
+        st.sidebar.error(f"Ingest failed: {e}")
 
 st.sidebar.divider()
 
-# Status
 if "retriever" in st.session_state:
     st.sidebar.success("Index: ready ✅")
 else:
@@ -85,7 +96,7 @@ st.subheader("Ask a question")
 
 question = st.text_input(
     "Your question",
-    placeholder="e.g., Summarize the key points in this document."
+    placeholder="e.g., Summarize the key points in this document.",
 )
 
 col1, col2 = st.columns([1, 1])
@@ -98,15 +109,23 @@ if col2.button("Reset chat"):
 if ask_clicked:
     if "retriever" not in st.session_state:
         st.error("No index found. Upload documents and click Ingest first.")
+    elif st.session_state.chain is None:
+        st.error("OpenAI API key is not configured. Set OPENAI_API_KEY in .env and restart.")
     else:
-        with st.spinner("Retrieving relevant info and generating answer..."):
-            result = ask_question(question, st.session_state["retriever"])
-
-        st.session_state.chat.append({
-            "question": question,
-            "answer": result["answer"],
-            "sources": result["sources"],
-        })
+        try:
+            with st.spinner("Retrieving relevant info and generating answer..."):
+                result = ask_question(
+                    question,
+                    st.session_state["retriever"],
+                    chain=st.session_state.chain,
+                )
+            st.session_state.chat.append({
+                "question": question,
+                "answer": result["answer"],
+                "sources": result["sources"],
+            })
+        except Exception as e:  # noqa: BLE001
+            st.error(f"Question failed: {e}")
 
 # Display chat history (oldest → newest)
 for turn in st.session_state.chat:
