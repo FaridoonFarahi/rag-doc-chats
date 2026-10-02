@@ -10,10 +10,10 @@ from langchain_community.document_loaders.word_document import Docx2txtLoader
 
 def load_documents(file_paths: List[Path]) -> List[Document]:
     """
-    Takes a list of file paths and returns LangChain Document objects.
-    Each Document contains:
-      - page_content: the text
-      - metadata: info like source filename, page number, etc.
+    Load files into LangChain Document objects.
+
+    Each Document has page_content (the text) and metadata such as the
+    source filename and page number. Unsupported file types are skipped.
     """
     docs: List[Document] = []
 
@@ -26,7 +26,7 @@ def load_documents(file_paths: List[Path]) -> List[Document]:
             docs.extend(loader.load())
 
         elif suffix == ".txt":
-            # TextLoader loads whole file as one Document (metadata includes source).
+            # TextLoader returns the whole file as one Document, with the source in metadata.
             loader = TextLoader(str(path), encoding="utf-8")
             docs.extend(loader.load())
 

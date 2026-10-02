@@ -1,174 +1,145 @@
-# 📄 Docs Chat (RAG) — End-to-End Retrieval-Augmented Generation System
+# Docs Chat (RAG): an end-to-end retrieval-augmented generation system
 
-A **production-oriented Retrieval-Augmented Generation (RAG) system** that allows users to upload documents (PDF / DOCX / TXT) and ask natural-language questions. Answers are generated **strictly from retrieved source content** and returned with **explicit citations and source snippets**.
+A production-oriented retrieval-augmented generation (RAG) system. You upload documents (PDF, DOCX, or TXT) and ask questions in plain language. Answers come only from the retrieved source text, and each one comes back with citations and the source snippets it used.
 
-This project demonstrates **end-to-end ML / AI system design**, including ingestion, embedding, vector indexing, semantic retrieval, controlled LLM generation, UI state management, and a deployment-ready architecture.
+The project covers the whole ML/AI system: ingestion, embedding, vector indexing, semantic retrieval, controlled LLM generation, UI state management, and an architecture that is ready to deploy.
 
----
+## What problem it solves
 
-## 🔍 What This Project Solves
+Large language models (LLMs) can't reliably answer questions about private or user-provided documents without hallucinating. Uploading files into a chat interface gives you little transparency, no persistence, and no control over how retrieval works.
 
-Large Language Models (LLMs) cannot reliably answer questions about **private or user-provided documents** without hallucination. Naively uploading files into chat interfaces provides limited transparency, no persistence, and no control over retrieval behavior.
+This project uses a full RAG architecture:
 
-This project implements a **true RAG architecture**, where:
+- Retrieval is explicit, and you can inspect what was retrieved.
+- Generation is constrained to the retrieved context.
+- The data persists and can be reused.
+- System behavior is deterministic and auditable.
 
-- Retrieval is explicit and inspectable  
-- Generation is constrained and grounded  
-- Data is persistent and reusable  
-- System behavior is deterministic and auditable  
-
----
-
-## 🚀 Key Features
+## Features
 
 - Upload and index documents (PDF, DOCX, TXT)
-- Persistent vector indexing using embeddings
+- Persistent vector index built from embeddings
 - Semantic similarity search (vector retrieval)
-- Source-grounded LLM answers with citations
-- Expandable source snippets for explainability
-- Session-cached retrieval for low-latency Q&A
-- Windows-safe index lifecycle management
+- LLM answers grounded in the sources, with citations
+- Expandable source snippets so you can see where an answer came from
+- Retrieval cached per session for low-latency Q&A
+- Index lifecycle that is safe on Windows
 - Modular architecture designed for deployment
 
----
+## Why RAG instead of uploading a PDF to ChatGPT
 
-## 🧠 Why RAG (and Not Just Upload a PDF to ChatGPT?)
+Uploading a document to ChatGPT is a convenience feature. Here is how it compares with this project:
 
-Uploading a document to ChatGPT is a **convenience feature**, not a system.
-
-| Capability | ChatGPT Upload | This RAG System |
+| Capability | ChatGPT upload | This RAG system |
 |-----------|---------------|----------------|
-| Persistence | ❌ Session-only | ✅ Persistent |
-| Retrieval Control | ❌ Hidden | ✅ Explicit |
-| Chunking Strategy | ❌ None | ✅ Configurable |
-| Explainability | ❌ Limited | ✅ Full |
-| Auditability | ❌ No | ✅ Yes |
-| Scalability | ❌ Low | ✅ High |
-| Automation | ❌ Manual | ✅ Programmatic |
+| Persistence | Session only | Persistent |
+| Retrieval control | Hidden | Explicit |
+| Chunking strategy | None | Configurable |
+| Explainability | Limited | Full |
+| Auditability | No | Yes |
+| Scalability | Low | High |
+| Automation | Manual | Programmatic |
 
-> **ChatGPT upload = smart reader**  
-> **This project = search engine + controlled reasoning layer**
+ChatGPT's upload works like a smart reader. This project is a search engine with a controlled reasoning layer on top.
 
----
+## System architecture
 
-## 🏗️ System Architecture
-
-The system follows a **modular RAG pipeline**:
+The system is a modular RAG pipeline:
 
 ```
 Ingestion (offline) → Vector Index → Retrieval (runtime) → Generation (runtime)
 ```
 
-### End-to-End Flow
+### End-to-end flow
 
-1. User uploads documents via the web UI  
-2. Documents are persisted to disk  
-3. Text is extracted from files  
-4. Text is split into semantic chunks  
-5. Each chunk is embedded into vector space  
-6. Embeddings are stored in a persistent vector database  
-7. User questions are embedded at runtime  
-8. Top-K semantically similar chunks are retrieved  
-9. LLM generates an answer using **only retrieved context**  
-10. Answer is returned with citations and source snippets  
+1. The user uploads documents through the web UI.
+2. The documents are saved to disk.
+3. Text is extracted from the files.
+4. The text is split into semantic chunks.
+5. Each chunk is embedded into vector space.
+6. The embeddings are stored in a persistent vector database.
+7. Each user question is embedded at runtime.
+8. The top-K most similar chunks are retrieved.
+9. The LLM generates an answer using only the retrieved context.
+10. The answer is returned with citations and source snippets.
 
----
+## Ingestion pipeline (offline)
 
-## 🔬 Ingestion Pipeline (Offline)
+Implemented in `app/rag.py → ingest_files()`.
 
-**Implementation:** `app/rag.py → ingest_files()`
+### 1. Document loading
 
-### 1. Document Loading
-- PDF → `PyPDFLoader`
-- DOCX → `Docx2txtLoader`
-- TXT → `TextLoader`
+- PDF: `PyPDFLoader`
+- DOCX: `Docx2txtLoader`
+- TXT: `TextLoader`
 
 Each file is converted into `Document` objects containing:
+
 - `page_content` (text)
 - `metadata` (source file path, page number)
 
 ### 2. Chunking
-- Uses `RecursiveCharacterTextSplitter`
-- Configurable chunk size and overlap
-- Prevents context window overflow
-- Improves retrieval precision
+
+Text is split with `RecursiveCharacterTextSplitter`, with configurable chunk size and overlap. Chunking keeps each piece inside the context window and improves retrieval precision.
 
 ### 3. Embedding
-- Each chunk is converted into a dense vector
-- Embeddings encode **semantic meaning**, not keywords
-- Enables similarity-based retrieval
 
-### 4. Vector Storage
-- Stored in **Chroma** (persistent vector database)
-- Each ingestion uses a **new collection namespace**
-- Avoids Windows file-locking (`WinError 32`)
-- Enables safe index resets without deleting files
+Each chunk is converted into a dense vector. The embeddings capture meaning rather than exact keywords, so retrieval works by similarity.
 
----
+### 4. Vector storage
 
-## 🔍 Retrieval Layer
+Chunks are stored in Chroma, a persistent vector database. Each ingestion uses a new collection namespace. This avoids Windows file locking (`WinError 32`) and lets you reset the index safely without deleting files.
 
-Retrieval is **fully decoupled from generation**.
+## Retrieval layer
 
-### Retrieval Process
+Retrieval is fully decoupled from generation.
 
-1. User question → embedding  
-2. Vector similarity search (cosine distance)  
-3. Top-K relevant chunks retrieved  
-4. Chunks labeled `[1], [2], …`  
+### Retrieval process
 
-### Key Design Principle
+1. The user's question is embedded.
+2. A vector similarity search runs (cosine distance).
+3. The top-K relevant chunks are retrieved.
+4. The chunks are labeled `[1], [2], …`.
 
-The LLM **does not search documents**.  
-It only receives retrieved context.
+### Design principle
 
----
+The LLM does not search the documents. It only receives the retrieved context.
 
-## ✍️ Generation Layer
+## Generation layer
 
-The LLM is used strictly for **synthesis**, not retrieval.
+The LLM is used only to synthesize an answer from what retrieval returns.
 
-### Prompt Controls
+### Prompt controls
 
-- Enforced system prompt:
-  - Use only provided context
-  - Do not hallucinate
+- The system prompt tells the model to:
+  - Use only the provided context
+  - Not hallucinate
   - Cite sources using `[1][2]`
-- Context constructed only from retrieved chunks
+- The context is built only from retrieved chunks.
 
-This dramatically reduces unsupported answers.
+Together these sharply reduce unsupported answers.
 
----
-
-## 📎 Source Attribution & Explainability
+## Source attribution and explainability
 
 Every answer includes:
-- Source file name
-- Page number (when available)
-- Raw retrieved text snippet
 
-This enables:
-- Auditing
-- Debugging retrieval quality
-- Trust and transparency
+- The source file name
+- The page number (when available)
+- The raw retrieved text snippet
 
----
+This lets you audit answers, debug retrieval quality, and see exactly where each answer came from.
 
-## ⚙️ State & Performance Optimizations
+## State and performance
 
-### Session Caching
-- Vector DB and retriever cached in `st.session_state`
-- Prevents repeated DB reloads
-- Improves latency for multi-question sessions
+### Session caching
 
-### Windows Compatibility
-- No deletion of active vector DB files
-- Collection switching instead of filesystem deletion
-- Eliminates Windows file-lock crashes
+The vector DB and retriever are cached in `st.session_state`, so the app doesn't reload the DB on every question. This lowers latency when you ask several questions in one session.
 
----
+### Windows compatibility
 
-## 📁 Project Structure
+The app never deletes active vector DB files. It switches to a new collection instead of deleting from the filesystem, which prevents Windows file-lock crashes.
+
+## Project structure
 
 ```
 rag-doc-chat/
@@ -186,9 +157,7 @@ rag-doc-chat/
 └── requirements.txt
 ```
 
----
-
-## 🛠️ Setup
+## Setup
 
 ```bash
 # 1. Clone and enter the repo
@@ -212,4 +181,4 @@ cp .env.example .env        # then edit .env and paste your key
 streamlit run app/ui.py
 ```
 
-> The `.env` file is gitignored — never commit your API key.
+The `.env` file is gitignored. Never commit your API key.

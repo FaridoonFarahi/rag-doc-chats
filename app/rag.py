@@ -25,7 +25,7 @@ from app.loaders import load_documents
 
 
 class IngestError(Exception):
-    """Raised when ingestion cannot proceed (oversized file, too many chunks, etc.)."""
+    """Raised when ingestion can't proceed, e.g. an oversized file or too many chunks."""
 
 
 def _require_api_key() -> None:
@@ -37,26 +37,28 @@ def _require_api_key() -> None:
 
 def save_uploads(uploaded_files) -> List[Path]:
     """
-    Save Streamlit UploadedFile objects to disk so loaders can read them reliably.
-    Filenames are sanitized to prevent path traversal, and per-file size is capped.
+    Save Streamlit UploadedFile objects to disk so the loaders can read them.
+
+    Filenames are reduced to their basename to prevent path traversal, and
+    each file is capped at MAX_UPLOAD_BYTES.
     """
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
     saved_paths: List[Path] = []
-    for uf in uploaded_files:
-        # Strip any directory components — only keep the basename.
-        safe_name = Path(uf.name).name
+    for uploaded_file in uploaded_files:
+        # Drop any directory components and keep only the basename.
+        safe_name = Path(uploaded_file.name).name
         if not safe_name or safe_name in {".", ".."}:
-            raise IngestError(f"Invalid filename: {uf.name!r}")
+            raise IngestError(f"Invalid filename: {uploaded_file.name!r}")
 
-        buf = uf.getbuffer()
-        if len(buf) > MAX_UPLOAD_BYTES:
+        file_bytes = uploaded_file.getbuffer()
+        if len(file_bytes) > MAX_UPLOAD_BYTES:
             raise IngestError(
                 f"{safe_name} exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)} MB upload limit."
             )
 
         save_path = UPLOAD_DIR / safe_name
-        save_path.write_bytes(buf)
+        save_path.write_bytes(file_bytes)
         saved_paths.append(save_path)
 
     return saved_paths
@@ -64,7 +66,8 @@ def save_uploads(uploaded_files) -> List[Path]:
 
 def ingest_files(file_paths: List[Path], collection_name: str) -> Tuple[int, int]:
     """
-    Ingest pipeline: load → split → embed → persist in Chroma under collection_name.
+    Load, split, and embed the files, then persist them in Chroma under collection_name.
+
     Returns (num_documents_loaded, num_chunks_indexed).
     """
     _require_api_key()
@@ -114,7 +117,7 @@ def get_db_and_retriever(collection_name: str):
 
 
 def build_chain():
-    """Build the prompt | llm | parser chain once; reusable across questions."""
+    """Build the prompt | llm | parser chain. Build it once and reuse it across questions."""
     _require_api_key()
 
     prompt = ChatPromptTemplate.from_messages([
@@ -130,24 +133,24 @@ def build_chain():
 
 def _format_context(retrieved_docs) -> str:
     blocks = []
-    for i, d in enumerate(retrieved_docs, start=1):
-        src = d.metadata.get("source", "unknown")
-        page = d.metadata.get("page", None)
+    for i, doc in enumerate(retrieved_docs, start=1):
+        src = doc.metadata.get("source", "unknown")
+        page = doc.metadata.get("page", None)
         page_str = f", page {page}" if page is not None else ""
-        blocks.append(f"[{i}] Source: {src}{page_str}\n{d.page_content}")
+        blocks.append(f"[{i}] Source: {src}{page_str}\n{doc.page_content}")
     return "\n\n".join(blocks)
 
 
 def _format_sources(retrieved_docs) -> List[Dict[str, Any]]:
     sources = []
-    for i, d in enumerate(retrieved_docs, start=1):
-        snippet = d.page_content
+    for i, doc in enumerate(retrieved_docs, start=1):
+        snippet = doc.page_content
         if len(snippet) > 350:
             snippet = snippet[:350] + "…"
         sources.append({
             "id": i,
-            "source": d.metadata.get("source", "unknown"),
-            "page": d.metadata.get("page", None),
+            "source": doc.metadata.get("source", "unknown"),
+            "page": doc.metadata.get("page", None),
             "snippet": snippet,
         })
     return sources
@@ -155,8 +158,10 @@ def _format_sources(retrieved_docs) -> List[Dict[str, Any]]:
 
 def ask_question(question: str, retriever, chain=None) -> Dict[str, Any]:
     """
-    Retrieve top-k chunks, send (question, context) through the cached chain,
-    return {answer, sources}. Pass `chain` from session cache to avoid rebuilding.
+    Retrieve the top-k chunks and run the question and context through the chain.
+
+    Returns {answer, sources}. Pass `chain` from the session cache to avoid
+    rebuilding it on every question.
     """
     if chain is None:
         chain = build_chain()
